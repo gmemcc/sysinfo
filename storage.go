@@ -6,21 +6,30 @@ package sysinfo
 
 import (
 	"bufio"
+	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 // StorageDevice information.
 type StorageDevice struct {
-	Name   string `json:"name,omitempty"`
-	Driver string `json:"driver,omitempty"`
-	Vendor string `json:"vendor,omitempty"`
-	Model  string `json:"model,omitempty"`
-	Serial string `json:"serial,omitempty"`
-	Size   uint   `json:"size,omitempty"` // device size in GB
+	Name       string               `json:"name,omitempty"`
+	Driver     string               `json:"driver,omitempty"`
+	Vendor     string               `json:"vendor,omitempty"`
+	Model      string               `json:"model,omitempty"`
+	Serial     string               `json:"serial,omitempty"`
+	Size       uint                 `json:"size,omitempty"` // device size in MB
+	Partitions map[string]Partition `json:"partitions,omitempty"`
+}
+
+type Partition struct {
+	MountPoint string `json:"mountPoint,omitempty"`
+	Size       uint   `json:"size,omitempty"` // partition size in MB
 }
 
 func getSerial(name, fullpath string) (serial string) {
@@ -65,6 +74,51 @@ func (si *SysInfo) getStorageInfo() {
 		return
 	}
 
+	procMounts := "/proc/mounts"
+	var mountsInfo []byte
+	mountsInfo, err = ioutil.ReadFile(procMounts)
+	if err != nil {
+		return
+	}
+	partmounts := make(map[string]string)
+	s := bufio.NewScanner(bytes.NewBuffer(mountsInfo))
+	for {
+		if s.Scan() {
+			line := s.Text()
+			if strings.Index(line, "/dev/") == 0 {
+				mountinfo := strings.Split(line, " ")
+				_, exist := partmounts[mountinfo[0]]
+				if !exist {
+					partmounts[mountinfo[0]] = mountinfo[1]
+				}
+			}
+		} else {
+			break
+		}
+	}
+
+	procParts := "/proc/partitions"
+	var partsInfo []byte
+	partsInfo, err = ioutil.ReadFile(procParts)
+	mountsInfo, err = ioutil.ReadFile(procMounts)
+	if err != nil {
+		return
+	}
+	partsizes := make(map[string]string)
+	s = bufio.NewScanner(bytes.NewBuffer(partsInfo))
+	for {
+		if s.Scan() {
+			line := s.Text()
+			regex := regexp.MustCompile(`\w+`)
+			partinfo := regex.FindAllString(line, -1)
+			if len(partinfo) == 4 {
+				partsizes[partinfo[3]] = partinfo[2]
+			}
+		} else {
+			break
+		}
+	}
+
 	si.Storage = make([]StorageDevice, 0)
 	for _, link := range devices {
 		fullpath := path.Join(sysBlock, link.Name())
@@ -98,8 +152,27 @@ func (si *SysInfo) getStorageInfo() {
 		}
 
 		size, _ := strconv.ParseUint(slurpFile(path.Join(fullpath, "size")), 10, 64)
-		device.Size = uint(size) / 1953125 // GiB
-
+		device.Size = uint(size) * 1000 / 1953125 // MiB
+		devpath := fmt.Sprintf("/dev/%s", device.Name)
+		parts := make(map[string]Partition)
+		for part, mp := range partmounts {
+			if strings.Index(part, devpath) == 0 {
+				partName := part[5:]
+				var psize uint
+				sizeStr, ok := partsizes[partName]
+				if ok {
+					size, _ := strconv.ParseUint(sizeStr, 10, 64)
+					psize = uint(size) * 1024 / 1000 / 1000
+				}
+				parts[partName] = Partition{
+					MountPoint: mp,
+					Size:       psize,
+				}
+			}
+		}
+		if len(parts) > 0 {
+			device.Partitions = parts
+		}
 		si.Storage = append(si.Storage, device)
 	}
 }
