@@ -15,6 +15,9 @@ import (
 
 func Test(t *testing.T) {
 	var si sysinfo.SysInfo
+	si.Config = sysinfo.Config{
+		KBSize: 1000,
+	}
 
 	si.GetSysInfo()
 

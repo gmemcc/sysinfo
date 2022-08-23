@@ -5,6 +5,10 @@
 // Package sysinfo is a Go library providing Linux OS / kernel / hardware system information.
 package sysinfo
 
+type Config struct {
+	KBSize int
+}
+
 // SysInfo struct encapsulates all other information structs.
 type SysInfo struct {
 	Meta    Meta            `json:"sysinfo"`
@@ -19,6 +23,7 @@ type SysInfo struct {
 	Memory  Memory          `json:"memory"`
 	Storage []StorageDevice `json:"storage,omitempty"`
 	Network []NetworkDevice `json:"network,omitempty"`
+	Config  Config          `json:"-"`
 }
 
 // GetSysInfo gathers all available system information.

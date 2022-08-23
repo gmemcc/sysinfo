@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"io/ioutil"
 	"os"
 	"path"
@@ -28,8 +29,9 @@ type StorageDevice struct {
 }
 
 type Partition struct {
-	MountPoint string `json:"mountPoint,omitempty"`
-	Size       uint   `json:"size,omitempty"` // partition size in MB
+	MountPoint    string `json:"mountPoint,omitempty"`
+	Size          uint   `json:"size,omitempty"`          // partition size in MB
+	AvailableSize uint   `json:"availableSize,omitempty"` // available space in MB
 }
 
 func getSerial(name, fullpath string) (serial string) {
@@ -68,6 +70,10 @@ scan:
 }
 
 func (si *SysInfo) getStorageInfo() {
+	kbSize := 1000
+	if si.Config.KBSize != 0 {
+		kbSize = si.Config.KBSize
+	}
 	sysBlock := "/sys/block"
 	devices, err := ioutil.ReadDir(sysBlock)
 	if err != nil {
@@ -152,7 +158,7 @@ func (si *SysInfo) getStorageInfo() {
 		}
 
 		size, _ := strconv.ParseUint(slurpFile(path.Join(fullpath, "size")), 10, 64)
-		device.Size = uint(size) * 1000 / 1953125 // MiB
+		device.Size = uint(size * 512 / (uint64(kbSize) * uint64(kbSize))) // MiB
 		devpath := fmt.Sprintf("/dev/%s", device.Name)
 		parts := make(map[string]Partition)
 		for part, mp := range partmounts {
@@ -162,12 +168,18 @@ func (si *SysInfo) getStorageInfo() {
 				sizeStr, ok := partsizes[partName]
 				if ok {
 					size, _ := strconv.ParseUint(sizeStr, 10, 64)
-					psize = uint(size) * 1024 / 1000 / 1000
+					psize = uint(size * 1024 / uint64(kbSize) / uint64(kbSize))
 				}
-				parts[partName] = Partition{
+				partition := Partition{
 					MountPoint: mp,
 					Size:       psize,
 				}
+				asize, err := diskUsage(mp)
+				if err == nil {
+					partition.AvailableSize = uint(asize / 1024 / 1024)
+				}
+				parts[partName] = partition
+
 			}
 		}
 		if len(parts) > 0 {
@@ -175,4 +187,13 @@ func (si *SysInfo) getStorageInfo() {
 		}
 		si.Storage = append(si.Storage, device)
 	}
+}
+
+func diskUsage(path string) (used uint64, err error) {
+	var stat unix.Statfs_t
+	if err = unix.Statfs(path, &stat); err != nil {
+		return
+	}
+	used = stat.Bavail * uint64(stat.Bsize)
+	return
 }
