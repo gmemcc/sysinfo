@@ -4,13 +4,16 @@
 
 package sysinfo
 
+import "os"
+
 // Board information.
 type Board struct {
-	Name     string `json:"name,omitempty"`
-	Vendor   string `json:"vendor,omitempty"`
-	Version  string `json:"version,omitempty"`
-	Serial   string `json:"serial,omitempty"`
-	AssetTag string `json:"assettag,omitempty"`
+	Name              string `json:"name,omitempty"`
+	Vendor            string `json:"vendor,omitempty"`
+	Version           string `json:"version,omitempty"`
+	Serial            string `json:"serial,omitempty"`
+	AssetTag          string `json:"assettag,omitempty"`
+	FirmwareInterface string `json:"firmwareInterface,omitempty"`
 }
 
 func (si *SysInfo) getBoardInfo() {
@@ -19,4 +22,11 @@ func (si *SysInfo) getBoardInfo() {
 	si.Board.Version = slurpFile("/sys/class/dmi/id/board_version")
 	si.Board.Serial = slurpFile("/sys/class/dmi/id/board_serial")
 	si.Board.AssetTag = slurpFile("/sys/class/dmi/id/board_asset_tag")
+	si.Board.FirmwareInterface = func() string {
+		if _, err := os.Stat("/sys/firmware/efi"); err == nil {
+			return "efi"
+		} else {
+			return "bios"
+		}
+	}()
 }
