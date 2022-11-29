@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	diskfs "github.com/diskfs/go-diskfs"
 	"golang.org/x/sys/unix"
 	"io/ioutil"
 	"os"
@@ -19,13 +20,14 @@ import (
 
 // StorageDevice information.
 type StorageDevice struct {
-	Name       string               `json:"name,omitempty"`
-	Driver     string               `json:"driver,omitempty"`
-	Vendor     string               `json:"vendor,omitempty"`
-	Model      string               `json:"model,omitempty"`
-	Serial     string               `json:"serial,omitempty"`
-	Size       uint                 `json:"size,omitempty"` // device size in MB
-	Partitions map[string]Partition `json:"partitions,omitempty"`
+	Name          string               `json:"name,omitempty"`
+	Driver        string               `json:"driver,omitempty"`
+	Vendor        string               `json:"vendor,omitempty"`
+	Model         string               `json:"model,omitempty"`
+	Serial        string               `json:"serial,omitempty"`
+	Size          uint                 `json:"size,omitempty"` // device size in MB
+	Partitions    map[string]Partition `json:"partitions,omitempty"`
+	PartitionType string               `json:"partitionType,omitempty"`
 }
 
 type Partition struct {
@@ -127,7 +129,8 @@ func (si *SysInfo) getStorageInfo() {
 
 	si.Storage = make([]StorageDevice, 0)
 	for _, link := range devices {
-		fullpath := path.Join(sysBlock, link.Name())
+		name := link.Name()
+		fullpath := path.Join(sysBlock, name)
 		dev, err := os.Readlink(fullpath)
 		if err != nil {
 			continue
@@ -144,9 +147,16 @@ func (si *SysInfo) getStorageInfo() {
 		}
 
 		device := StorageDevice{
-			Name:   link.Name(),
+			Name:   name,
 			Model:  slurpFile(path.Join(fullpath, "device", "model")),
-			Serial: getSerial(link.Name(), fullpath),
+			Serial: getSerial(name, fullpath),
+		}
+		devpath := fmt.Sprintf("/dev/%s", device.Name)
+
+		if disk, err := diskfs.OpenWithMode(devpath, diskfs.ReadOnly); err == nil {
+			if pt, err := disk.GetPartitionTable(); err == nil {
+				device.PartitionType = pt.Type()
+			}
 		}
 
 		if driver, err := os.Readlink(path.Join(fullpath, "device", "driver")); err == nil {
@@ -159,7 +169,6 @@ func (si *SysInfo) getStorageInfo() {
 
 		size, _ := strconv.ParseUint(slurpFile(path.Join(fullpath, "size")), 10, 64)
 		device.Size = uint(size * 512 / (uint64(kbSize) * uint64(kbSize))) // MiB
-		devpath := fmt.Sprintf("/dev/%s", device.Name)
 		parts := make(map[string]Partition)
 		for part, mp := range partmounts {
 			if strings.Index(part, devpath) == 0 {
